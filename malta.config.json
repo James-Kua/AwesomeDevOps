@@ -1,7 +1,7 @@
 {
   "name": "DevOps",
   "description": "Some self compiled notes on DevOps",
-  "domain": "https://james-kua.github.io/DevOpsNotes",
+  "domain": "https://awesome-devops.pages.dev",
   "sidebar": [
     {
       "title": "Cloud",
@@ -12,7 +12,7 @@
     {
       "title": "Links",
       "pages": [
-        ["GitHub", "https://github.com/James-Kua/Malta"]
+        ["GitHub", "https://github.com/James-Kua/AwesomeDevOps"]
       ]
     }
   ]
