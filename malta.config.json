@@ -13,7 +13,8 @@
       "title": "Networking",
       "pages": [
         ["DNS", "/networking/dns"],
-        ["SSL/TLS", "/networking/ssl-tls"]
+        ["SSL/TLS", "/networking/ssl-tls"],
+        ["HTTP/HTTPS", "/networking/http-https"]
       ]
     },
     {
