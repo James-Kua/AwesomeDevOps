@@ -1,0 +1,19 @@
+{
+  "name": "DevOps",
+  "description": "Some self compiled notes on DevOps",
+  "domain": "https://james-kua.github.io/DevOpsNotes",
+  "sidebar": [
+    {
+      "title": "Cloud",
+      "pages": [
+        ["Kubernetes", "/cloud/kubernetes"]
+      ]
+    },
+    {
+      "title": "Links",
+      "pages": [
+        ["GitHub", "https://github.com/James-Kua/Malta"]
+      ]
+    }
+  ]
+}
