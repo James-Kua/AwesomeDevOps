@@ -10,6 +10,12 @@
       ]
     },
     {
+      "title": "Networking",
+      "pages": [
+        ["DNS", "/networking/dns"]
+      ]
+    },
+    {
       "title": "Links",
       "pages": [
         ["GitHub", "https://github.com/James-Kua/AwesomeDevOps"]
