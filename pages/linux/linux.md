@@ -1,6 +1,7 @@
 ---
 title: "Linux"
 ---
+# Linux
 
 ## Disk
 

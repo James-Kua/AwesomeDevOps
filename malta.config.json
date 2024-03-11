@@ -24,6 +24,12 @@
       ]
     },
     {
+      "title": "Database",
+      "pages": [
+        ["Database", "/database/database"]
+      ]
+    },
+    {
       "title": "Linux",
       "pages": [
         ["Linux", "/linux/linux"]
