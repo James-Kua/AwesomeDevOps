@@ -18,6 +18,18 @@
       ]
     },
     {
+      "title": "Operating Systems",
+      "pages": [
+        ["OS Concepts", "/os/os-concepts"]
+      ]
+    },
+    {
+      "title": "Linux",
+      "pages": [
+        ["Linux", "/linux/linux"]
+      ]
+    },
+    {
       "title": "Links",
       "pages": [
         ["GitHub", "https://github.com/James-Kua/AwesomeDevOps"]
