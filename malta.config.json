@@ -4,6 +4,12 @@
   "domain": "https://awesome-devops.pages.dev",
   "sidebar": [
     {
+      "title": "Programming",
+      "pages": [
+        ["Golang", "/programming/golang"]
+      ]
+    },
+    {
       "title": "Cloud",
       "pages": [
         ["Kubernetes", "/cloud/kubernetes"]
