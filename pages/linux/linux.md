@@ -3,6 +3,37 @@ title: "Linux"
 ---
 # Linux
 
+![](https://www.brendangregg.com/Perf/linux_perf_tools_full.png)
+
+## Files
+
+### lsblk
+
+lsblk lists information about all or the specified block devices. The lsblk command reads the sysfs filesystem to gather information.
+
+The command prints all block devices (except RAM disks) in a tree-like format by default. Use lsblk --help to get a list of all available columns.
+
+```bash
+$lsblk
+NAME                         MAJ:MIN RM   SIZE RO TYPE   MOUNTPOINT
+sda                            8:0    0 931.5G  0 disk
+├─sda1                         8:1    0   500M  0 part   /boot
+└─sda2                         8:2    0   931G  0 part
+  ├─vg_xldesk-lv_root (dm-0) 253:0    0    50G  0 lvm    /
+  ├─vg_xldesk-lv_swap (dm-1) 253:1    0  17.7G  0 lvm    [SWAP]
+  └─vg_xldesk-lv_home (dm-2) 253:2    0   1.8T  0 lvm    /home
+sdc                            8:32   0 232.9G  0 disk
+└─sdc1                         8:33   0 232.9G  0 part
+  └─md1                        9:1    0 232.9G  0 raid10 /data
+sdb                            8:16   0 931.5G  0 disk
+└─sdb1                         8:17   0 931.5G  0 part
+  └─vg_xldesk-lv_home (dm-2) 253:2    0   1.8T  0 lvm    /home
+sdd                            8:48   0 232.9G  0 disk
+└─sdd1                         8:49   0 232.9G  0 part
+  └─md1                        9:1    0 232.9G  0 raid10 /data
+sr0                           11:0    1  1024M  0 rom
+```
+
 ## Disk
 
 ### df

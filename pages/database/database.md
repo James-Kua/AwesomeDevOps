@@ -304,6 +304,8 @@ Concurrent access is quite easy if all users are just reading data. There is no 
 
 DBMS Concurrency Control is used to address such conflicts, which mostly occur with a multi-user system. Therefore, Concurrency Control is the most important element for proper functioning of a Database Management System where two or more database transactions are executed simultaneously, which require access to the same data.
 
+The component of a Database Management System (DBMS) responsible for concurrency control is typically the concurrency control manager or module. This component ensures that multiple transactions can execute concurrently without interfering with each other in a way that would compromise the consistency and integrity of the database.
+
 Different concurrency control protocols offer different benefits between the amount of concurrency they allow and the amount of overhead that they impose. Following are the Concurrency Control techniques in DBMS:
 
 + Lock-Based Protocols
@@ -418,3 +420,38 @@ Validation Phase
 
 Write Phase
 + In the Write Phase, the updates are applied to the database if the validation is successful, else; the updates are not applied, and the transaction is rolled back.
+
+### Database Recovery Management
+
+Database recovery restores a database from a given state (usually inconsistent) to a previously consistent state. Recovery techniques are based on the atomic transaction property: all portions of the transaction must be treated as a single, logical unit of work in which all operations are applied and completed to produce a consistent database. If a transaction operation cannot be completed for some reason, the transaction must be aborted and any changes
+to the database must be rolled back (undone). In short, transaction recovery reverses all of the changes that the transaction made to the database before the transaction was aborted.
+
+## Write-Ahead Log Protocol (WAL)
+
+The Write-Ahead Log (WAL) protocol is a method used in database management systems to ensure durability and recoverability of transactions. In WAL, before any modifications are made to the database, a corresponding log entry is written to a persistent log file on disk. This log entry contains the details of the modification operation.
+
+The key principle of WAL is that the log entry must be written to disk before the corresponding database modification is made. This ensures that in the event of a system failure or crash, the log can be used to reconstruct the state of the database and recover any transactions that were in progress at the time of the failure.
+
+### Redundant Transaction Logs
+
+Redundant transaction logs refer to having multiple copies of transaction logs stored in different locations or on different storage media. This redundancy is implemented to enhance the reliability and fault tolerance of the database recovery process.
+
+By maintaining redundant copies of transaction logs, the risk of data loss due to hardware failures, disk corruption, or other system issues is mitigated. If one copy of the transaction log becomes inaccessible or corrupted, the database recovery process can still proceed using the redundant copies.
+
+### Database Buffers
+
+Database buffers, also known as buffer pools, are areas of memory used by database management systems to cache frequently accessed data pages from the disk. When a query or transaction requests data from the database, the database system first checks if the required data is already in the buffer pool. If it is, the data is retrieved from memory, which is much faster than reading it from disk.
+
+The use of database buffers helps improve the overall performance of the database system by reducing the frequency of disk reads. It also helps to reduce contention for disk resources and can improve concurrency by reducing the time spent waiting for disk I/O operations to complete.
+
+### Database Checkpoints
+
+A database checkpoint is a point-in-time snapshot of the database that represents a consistent state of the data. During normal operation, the database management system periodically performs checkpoints to write all in-memory modified data pages to disk.
+
+Checkpoints serve several purposes in database management:
+
++ Recovery: Checkpoints provide a known point from which the recovery process can start in the event of a system failure or crash. By ensuring that all modified data pages are written to disk, checkpoints help minimize the amount of work required to restore the database to a consistent state.
+
++ Performance: Checkpoints help reduce the time required for database recovery by limiting the number of transactions that need to be rolled back or rolled forward during the recovery process. By periodically flushing modified data pages to disk, checkpoints help prevent the transaction log from growing excessively large, which can degrade database performance.
+
++ Space Management: Checkpoints also help manage disk space usage by allowing the database management system to recycle log files and reclaim disk space that is no longer needed. After a checkpoint is performed, the log entries for transactions that were committed before the checkpoint can be safely discarded, as they are no longer needed for recovery purposes.
