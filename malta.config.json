@@ -6,7 +6,8 @@
     {
       "title": "Programming",
       "pages": [
-        ["Golang", "/programming/golang"]
+        ["Golang", "/programming/golang"],
+        ["Python", "/programming/python"]
       ]
     },
     {
