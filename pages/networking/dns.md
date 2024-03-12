@@ -106,3 +106,131 @@ The recursive resolver also has additional functionality depending on the types 
 + If the resolver does not have the NS records, it will send a query to the TLD servers (.com in our case), skipping the root server.
 
 + In the unlikely event that the resolver does not have records pointing to the TLD servers, it will then query the root servers. This event typically occurs after a DNS cache has been purged.
+
+
+## DNS Record Types
+
+### A Record
+
+The "A" stands for "address" and this is the most fundamental type of DNS record: it indicates the IP address of a given domain. For example, if you pull the DNS records of cloudflare.com, the A record currently returns an IP address of: 104.17.210.9.
+
+| Name      | Record Type | Value      | TTL   |
+| --------- | ----------- | ---------- | ----- |
+| @         | A           | 192.0.2.1  | 14400 |
+
+The "@" symbol in this example indicates that this is a record for the root domain, and the "14400" value is the TTL (time to live), listed in seconds. The default TTL for A records is 14,400 seconds. This means that if an A record gets updated, it takes 240 minutes (14,400 seconds) to take effect.
+
+The vast majority of websites only have one A record, but it is possible to have several. Some higher profile websites will have several different A records as part of a technique called round robin load balancing, which can distribute request traffic to one of several IP addresses, each hosting identical content.
+
+The most common usage of A records is IP address lookups: matching a domain name (like "cloudflare.com") to an IPv4 address. This enables a user's device to connect with and load a website, without the user memorizing and typing in the actual IP address. The user's web browser automatically carries this out by sending a query to a DNS resolver.
+
+DNS A records are also used for operating a Domain Name System-based Blackhole List (DNSBL). DNSBLs can help mail servers identify and block email messages from known spammer domains.
+
+### AAA Record
+
+DNS AAAA records match a domain name to an IPv6 address. DNS AAAA records are exactly like DNS A records, except that they store a domain's IPv6 address instead of its IPv4 address.
+
+IPv6 is the latest version of the Internet Protocol (IP). One of the important differences between IPv6 and IPv4 is that IPv6 addresses are longer than IPv4 addresses. The Internet is running out of IPv4 addresses, just as there are only so many possible phone numbers for a given area code. But IPv6 addresses offer exponentially more permutations and thus far more possible IP addresses.
+
+| Name      | Record Type | Value                                | TTL   |
+| --------- | ----------- | ------------------------------------ | ----- |
+| @         | AAAA        | 2001:0db8:85a3:0000:0000:8a2e:0370:7334 | 14400 |
+
+Like A records, AAAA records enable client devices to learn the IP address for a domain name. The client device can then connect with and load the website.
+
+AAAA records are only used when a domain has an IPv6 address in addition to an IPv4 address, and when the client device in question is configured to use IPv6. While all domains have one or more IPv4 addresses and accompanying A records, not all domains have IPv6 addresses, and not all user devices are configured to use IPv6.
+
+However, IPv6 is growing in adoption. This will likely continue to be the case because the number of available IPv4 addresses is rapidly diminishing, often forcing multiple devices to share an IPv4 address.
+
+### CNAME record
+
+A "canonical name" (CNAME) record points from an alias domain to a "canonical" domain. A CNAME record is used in lieu of an A record, when a domain or subdomain is an alias of another domain. All CNAME records must point to a domain, never to an IP address. Imagine a scavenger hunt where each clue points to another clue, and the final clue points to the treasure. A domain with a CNAME record is like a clue that can point you to another clue (another domain with a CNAME record) or to the treasure (a domain with an A record).
+
+For example, suppose blog.example.com has a CNAME record with a value of "example.com" (without the "blog"). This means when a DNS server hits the DNS records for blog.example.com, it actually triggers another DNS lookup to example.com, returning example.com’s IP address via its A record. In this case we would say that example.com is the canonical name (or true name) of blog.example.com.
+
+Oftentimes, when sites have subdomains such as blog.example.com or shop.example.com, those subdomains will have CNAME records that point to a root domain (example.com). This way if the IP address of the host changes, only the DNS A record for the root domain needs to be updated and all the CNAME records will follow along with whatever changes are made to the root.
+
+A frequent misconception is that a CNAME record must always resolve to the same website as the domain it points to, but this is not the case. The CNAME record only points the client to the same IP address as the root domain. Once the client hits that IP address, the web server will still handle the URL accordingly. So for instance, blog.example.com might have a CNAME that points to example.com, directing the client to example.com’s IP address. But when the client actually connects to that IP address, the web server will look at the URL, see that it is blog.example.com, and deliver the blog page rather than the home page.
+
+| Name           | Record Type | Value                     | TTL   |
+| -------------- | ----------- | ------------------------- | ----- |
+| blog.example.com | CNAME       | is an alias of example.com | 32600 |
+
+
+In this example you can see that blog.example.com points to example.com, and assuming it is based on our example A record we know that it will eventually resolve to the IP address 192.0.2.1.
+
+Can a CNAME record point to another CNAME record? Yes, but pointing a CNAME record to another CNAME record is inefficient because it requires multiple DNS lookups before the domain can be loaded — which slows down the user experience — but it is possible. For example, blog.example.com could have a CNAME record that pointed to www.example.com's CNAME record, which then pointed to example.com's A record.
+
+For blog.example.com:
+
+| Name           | Record Type | Value                      | TTL   |
+| -------------- | ----------- | -------------------------- | ----- |
+| blog.example.com | CNAME       | is an alias of www.example.com | 32600 |
+
+For www.example.com:
+
+| Name         | Record Type | Value               | TTL   |
+| ------------ | ----------- | ------------------- | ----- |
+| www.example.com | CNAME       | is an alias of example.com | 32600 |
+
+This configuration adds an extra step to the DNS lookup process and should be avoided if possible. Instead, the CNAME records for both blog.example.com and www.example.com should point directly to example.com.
+
+### NS record
+
+NS stands for ‘nameserver,’ and the nameserver record indicates which DNS server is authoritative for that domain (i.e. which server contains the actual DNS records). Basically, NS records tell the Internet where to go to find out a domain's IP address. A domain often has multiple NS records which can indicate primary and secondary nameservers for that domain. Without properly configured NS records, users will be unable to load a website or application.
+
+Here is an example of an NS record:
+
+| Name      | Record Type | Value                 | TTL   |
+| --------- | ----------- | --------------------- | ----- |
+| @         | NS          | ns1.exampleserver.com | 216
+
+Note that NS records can never point to a canonical name (CNAME) record.
+
+**What is a nameserver?**
+
+A nameserver is a type of DNS server. It is the server that stores all DNS records for a domain, including A records, MX records, or CNAME records.
+
+Almost all domains rely on multiple nameservers to increase reliability: if one nameserver goes down or is unavailable, DNS queries can go to another one. Typically there is one primary nameserver and several secondary nameservers, which store exact copies of the DNS records in the primary server. Updating the primary nameserver will trigger an update of the secondary nameservers as well.
+
+When multiple nameservers are used (as in most cases), NS records should list more than one server. Learn more about DNS servers.
+
+**When should NS records be updated or changed?**
+
+Domain administrators should update their NS records when they need to change their domain's nameservers. For instance, some cloud providers provide nameservers and require their customers to point to them.
+
+Admins may also wish to update their NS records if they want a subdomain to use different nameservers. In the example above, the nameserver for example.com is ns1.exampleserver.com. If the example.com admin wanted blog.example.com to resolve via a ns2.exampleserver.com instead, they could set this up by updating the NS record.
+
+When NS records are updated, it may take several hours for the changes to be replicated throughout the DNS.
+
+
+### MX record
+A DNS 'mail exchange' (MX) record directs email to a mail server. The MX record indicates how email messages should be routed in accordance with the Simple Mail Transfer Protocol (SMTP, the standard protocol for all email). Like CNAME records, an MX record must always point to another domain.
+
+| Name      | Record Type | Priority | Value                  | TTL   |
+| --------- | ----------- | -------- | ---------------------- | ----- |
+| @         | MX          | 10       | mailhost1.example.com | 45000 |
+| @         | MX          | 20       | mailhost2.example.com | 45000 |
+
+The 'priority' numbers before the domains for these MX records indicate preference; the lower 'priority' value is preferred. The server will always try mailhost1 first because 10 is lower than 20. In the result of a message send failure, the server will default to mailhost2.
+
+The email service could also configure this MX record so that both servers have equal priority and receive an equal amount of mail:
+
+| Name      | Record Type | Priority | Value                    | TTL   |
+| --------- | ----------- | -------- | ------------------------ | ----- |
+| @         | MX          | 10       | mailhost1.example.com   | 45000 |
+| @         | MX          | 10       | mailhost2.example.com   | 45000 |
+
+This configuration enables the email provider to equally balance the load between the two servers.
+
+**What is the process of querying an MX record?**
+
+Message transfer agent (MTA) software is responsible for querying MX records. When a user sends an email, the MTA sends a DNS query to identify the mail servers for the email recipients. The MTA establishes an SMTP connection with those mail servers, starting with the prioritized domains (in the first example above, mailhost1).
+
+**What is a backup MX record?**
+
+A backup MX record is just an MX record for a mail server with a higher 'priority' value (which means a lower priority), so that under normal circumstances mail will go to the more prioritized servers. In the first example above, mailhost2 would be the 'backup' server because email traffic will be handled by mailhost1 as long as it is up and running.
+
+**Can MX records point to a CNAME?**
+
+A CNAME record is used for referencing a domain's alias instead of its actual name. CNAME records typically point to an A record (in IPv4) or AAAA record (in IPv6) for that domain. However, MX records have to point directly to a server's A record or AAAA record. Pointing to a CNAME is forbidden by the RFC documents that define how MX records function.
