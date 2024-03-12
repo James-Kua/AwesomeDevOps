@@ -13,7 +13,8 @@
     {
       "title": "Technologies",
       "pages": [
-        ["Kubernetes", "/technologies/kubernetes"]
+        ["Kubernetes", "/technologies/kubernetes"],
+        ["Redis", "/technologies/redis"]
       ]
     },
     {
