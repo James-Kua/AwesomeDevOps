@@ -6,14 +6,14 @@
     {
       "title": "Programming",
       "pages": [
-        ["Golang", "/programming/golang"],
+        ["Go", "/programming/go"],
         ["Python", "/programming/python"]
       ]
     },
     {
-      "title": "Cloud",
+      "title": "Technologies",
       "pages": [
-        ["Kubernetes", "/cloud/kubernetes"]
+        ["Kubernetes", "/technologies/kubernetes"]
       ]
     },
     {

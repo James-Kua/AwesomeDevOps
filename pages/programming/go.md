@@ -1,8 +1,8 @@
 ---
-title: "Golang"
+title: "Go"
 ---
 
-# Golang
+# Go
 
 # Go file operations
 
