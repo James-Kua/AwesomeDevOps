@@ -3,7 +3,7 @@ title: "Linux"
 ---
 # Linux
 
-![](https://www.brendangregg.com/Perf/linux_perf_tools_full.png)
+![](https://raw.githubusercontent.com/fainyang/pictures/master/img/20191225190537.png)
 
 ## Files
 
