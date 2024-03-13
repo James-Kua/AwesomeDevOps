@@ -88,7 +88,21 @@ There are several new things to consider in this topology since we have now ente
 
 ## Redis Replication
 
-Every main instance of Redis has a replication ID and an offset. These two pieces of data are critical to figure out a point in time where a replica can continue its replication process or to determine if it needs to do a complete sync. This offset is incremented for every action that happens on the main Redis deployment.
+At the base of Redis replication (excluding the high availability features provided as an additional layer by Redis Cluster or Redis Sentinel) there is a leader follower (master-replica) replication that is simple to use and configure. It allows replica Redis instances to be exact copies of master instances. The replica will automatically reconnect to the master every time the link breaks, and will attempt to be an exact copy of it regardless of what happens to the master.
+
+This system works using three main mechanisms:
+
++ When a master and a replica instances are well-connected, the master keeps the replica updated by sending a stream of commands to the replica to replicate the effects on the dataset happening in the master side due to: client writes, keys expired or evicted, any other action changing the master dataset.
+
++ When the link between the master and the replica breaks, for network issues or because a timeout is sensed in the master or the replica, the replica reconnects and attempts to proceed with a partial resynchronization: it means that it will try to just obtain the part of the stream of commands it missed during the disconnection.
+
++ When a partial resynchronization is not possible, the replica will ask for a full resynchronization. This will involve a more complex process in which the master needs to create a snapshot of all its data, send it to the replica, and then continue sending the stream of commands as the dataset changes.
+
+Redis uses by default asynchronous replication, which being low latency and high performance, is the natural replication mode for the vast majority of Redis use cases. However, Redis replicas asynchronously acknowledge the amount of data they received periodically with the master. So the master does not wait every time for a command to be processed by the replicas, however it knows, if needed, what replica already processed what command. This allows having optional synchronous replication.
+
+**Replication ID Explained**
+
+Every Redis master has a replication ID: it is a large pseudo random string that marks a given story of the dataset. Each master also takes an offset that increments for every byte of replication stream that it is produced to be sent to replicas, to update the state of the replicas with the new changes modifying the dataset. The replication offset is incremented even if no replica is actually connected, so basically every given pair of:
 
 ```
 Replication ID, offset
@@ -101,6 +115,12 @@ If an instance has the same replication ID and offset, they have precisely the s
 For example, two instances, primary and secondary, have the identical replication ID but offsets that differ by a few hundred commands, meaning that if those were replayed on the instance that is just behind in offset, they would have the same dataset. Now if the replication IDs differ entirely, and when we are unaware of the previous replication ID (no common ancestor) of the newly demoted (and rejoining) secondary. We will need to perform an expensive full sync.
 
 Alternatively if we are aware of previous replication ID we can then reason about how to get the data in sync since we are able to reason about common ancestor they both shared and the offset is again meaningful for a partial sync.
+
+The reason why Redis instances have two replication IDs is because of replicas that are promoted to masters. After a failover, the promoted replica requires to still remember what was its past replication ID, because such replication ID was the one of the former master. In this way, when other replicas will sync with the new master, they will try to perform a partial resynchronization using the old master replication ID. This will work as expected, because when the replica is promoted to master it sets its secondary ID to its main ID, remembering what was the offset when this ID switch happened. Later it will select a new random replication ID, because a new history begins. 
+
+When handling the new replicas connecting, the master will match their IDs and offsets both with the current ID and the secondary ID (up to a given offset, for safety). In short this means that after a failover, replicas connecting to the newly promoted master don't have to perform a full sync.
+
+In case you wonder why a replica promoted to master needs to change its replication ID after a failover: it is possible that the old master is still working as a master because of some network partition: retaining the same replication ID would violate the fact that the same ID and same offset of any two random instances mean they have the same data set.
 
 ## Redis Sentinel
 
@@ -211,16 +231,379 @@ RDB (Redis Database): The RDB persistence performs point-in-time snapshots of yo
 
 The main downside to this mechanism is that data between snapshots will be lost. In addition, this storage mechanism also relies on forking the main process, and in a larger dataset, this may lead to a momentary delay in serving requests. That being said, RDB files are much faster being loaded in memory than AOF.
 
+RDB advantages:
+
++ RDB is a very compact single-file point-in-time representation of your Redis data. RDB files are perfect for backups. For instance you may want to archive your RDB files every hour for the latest 24 hours, and to save an RDB snapshot every day for 30 days. This allows you to easily restore different versions of the data set in case of disasters.
+
++ RDB is very good for disaster recovery, being a single compact file that can be transferred to far data centers, or onto Amazon S3 (possibly encrypted).
+
++ RDB maximizes Redis performances since the only work the Redis parent process needs to do in order to persist is forking a child that will do all the rest. The parent process will never perform disk I/O or alike.
+
++ RDB allows faster restarts with big datasets compared to AOF.
+
++ On replicas, RDB supports partial resynchronizations after restarts and failovers.
+
+RDB disadvantages:
+
++ RDB is NOT good if you need to minimize the chance of data loss in case Redis stops working (for example after a power outage). You can configure different save points where an RDB is produced (for instance after at least five minutes and 100 writes against the data set, you can have multiple save points). However you'll usually create an RDB snapshot every five minutes or more, so in case of Redis stopping working without a correct shutdown for any reason you should be prepared to lose the latest minutes of data.
+
++ RDB needs to fork() often in order to persist on disk using a child process. fork() can be time consuming if the dataset is big, and may result in Redis stopping serving clients for some milliseconds or even for one second if the dataset is very big and the CPU performance is not great. AOF also needs to fork() but less frequently and you can tune how often you want to rewrite your logs without any trade-off on durability.
+
 ### Append Only File
+
 AOF (Append Only File): The AOF persistence logs every write operation the server receives that will be played again at server startup, reconstructing the original dataset.
 
-This way of ensuring persistence is much more durable than RDB snapshots since it is an append-only file. As operations happen, we buffer them to the log, but they aren't persisted yet. This log consistents of the actual commands we ran in order for replay when needed.
+AOF advantages: 
++ Using AOF Redis is much more durable: you can have different fsync policies: no fsync at all, fsync every second, fsync at every query. With the default policy of fsync every second, write performance is still great. fsync is performed using a background thread and the main thread will try hard to perform writes when no fsync is in progress, so you can only lose one second worth of writes.
 
-Then when possible, we flush it to disk with fsync (when this runs is configurable), it will be persisted. The downside is that the format isn't compact and uses more disk than RDB files.
++ The AOF log is an append-only log, so there are no seeks, nor corruption problems if there is a power outage. Even if the log ends with a half-written command for some reason (disk full or other reasons) the redis-check-aof tool is able to fix it easily.
+
++ Redis is able to automatically rewrite the AOF in background when it gets too big. The rewrite is completely safe as while Redis continues appending to the old file, a completely new one is produced with the minimal set of operations needed to create the current data set, and once this second file is ready Redis switches the two and starts appending to the new one.
+
++ AOF contains a log of all the operations one after the other in an easy to understand and parse format. You can even easily export an AOF file. For instance even if you've accidentally flushed everything using the FLUSHALL command, as long as no rewrite of the log was performed in the meantime, you can still save your data set just by stopping the server, removing the latest command, and restarting Redis again.
+
+AOF disadvantages:
++ AOF files are usually bigger than the equivalent RDB files for the same dataset.
+
++ AOF can be slower than RDB depending on the exact fsync policy. In general with fsync set to every second performance is still very high, and with fsync disabled it should be exactly as fast as RDB even under high load. Still RDB is able to provide more guarantees about the maximum latency even in the case of a huge write load.
+
+**How durable is the append only file?**
+You can configure how many times Redis will fsync data on disk. There are three options:
+
++ appendfsync always: fsync every time new commands are appended to the AOF. Very very slow, very safe. Note that the commands are appended to the AOF after a batch of commands from multiple clients or a pipeline are executed, so it means a single write and a single fsync (before sending the replies).
+
++ appendfsync everysec: fsync every second. Fast enough (since version 2.4 likely to be as fast as snapshotting), and you may lose 1 second of data if there is a disaster.
+
++ appendfsync no: Never fsync, just put your data in the hands of the Operating System. The faster and less safe method. Normally Linux will flush data every 30 seconds with this configuration, but it's up to the kernel's exact tuning.
+
+The suggested (and default) policy is to fsync every second. It is both fast and relatively safe. The always policy is very slow in practice, but it supports group commit, so if there are multiple parallel writes Redis will try to perform a single fsync operation.
+
+**What should I do if my AOF gets truncated?**
+
+It is possible the server crashed while writing the AOF file, or the volume where the AOF file is stored was full at the time of writing. When this happens the AOF still contains consistent data representing a given point-in-time version of the dataset (that may be old up to one second with the default AOF fsync policy), but the last command in the AOF could be truncated. The latest major versions of Redis will be able to load the AOF anyway, just discarding the last non well formed command in the file. In this case the server will emit a log like the following:
+
+```
+* Reading RDB preamble from AOF file...
+* Reading the remaining AOF tail...
+# !!! Warning: short read while loading the AOF file !!!
+# !!! Truncating the AOF at offset 439 !!!
+# AOF loaded anyway because aof-load-truncated is enabled
+```
+
+You can change the default configuration to force Redis to stop in such cases if you want, but the default configuration is to continue regardless of the fact the last command in the file is not well-formed, in order to guarantee availability after a restart.
+
+**What should I do if my AOF gets corrupted?**
+
+If the AOF file is not just truncated, but corrupted with invalid byte sequences in the middle, things are more complex. Redis will complain at startup and will abort:
+
+```
+* Reading the remaining AOF tail...
+# Bad file format reading the append only file: make a backup of your AOF file, then use ./redis-check-aof --fix <filename>
+```
+
+The best thing to do is to run the redis-check-aof utility, initially without the --fix option, then understand the problem, jump to the given offset in the file, and see if it is possible to manually repair the file: The AOF uses the same format of the Redis protocol and is quite simple to fix manually. Otherwise it is possible to let the utility fix the file for us, but in that case all the AOF portion from the invalid part to the end of the file may be discarded, leading to a massive amount of data loss if the corruption happened to be in the initial part of the file.
 
 Why not both?
 
 RDB + AOF: It is possible to combine AOF and RDB in the same Redis instance. If durability in exchange for some speed is a tradeoff, you are willing to make it. I think this is an acceptable way to set up Redis. In the case of a restart, remember that if both are enabled, Redis will use AOF to reconstruct the data since it's the most complete.
+
+In general, use the following list for durability VS latency/performance tradeoffs, ordered from stronger safety to better latency.
+
++ AOF + fsync always: this is very slow, you should use it only if you know what you are doing.
++ AOF + fsync every second: this is a good compromise.
++ AOF + fsync every second + no-appendfsync-on-rewrite option set to yes: this is as the above, but avoids to fsync during rewrites to lower the disk pressure.
++ AOF + fsync never. Fsyncing is up to the kernel in this setup, even less disk pressure and risk of latency spikes.
++ RDB. Here you have a vast spectrum of tradeoffs depending on the save triggers you configure.
+
+## Factors impacting Redis performance
+
+There are multiple factors having direct consequences on Redis performance. We mention them here, since they can alter the result of any benchmarks. Please note however, that a typical Redis instance running on a low end, untuned box usually provides good enough performance for most applications.
+
++ Network bandwidth and latency usually have a direct impact on the performance. It is a good practice to use the ping program to quickly check the latency between the client and server hosts is normal before launching the benchmark. Regarding the bandwidth, it is generally useful to estimate the throughput in Gbit/s and compare it to the theoretical bandwidth of the network. For instance a benchmark setting 4 KB strings in Redis at 100000 q/s, would actually consume 3.2 Gbit/s of bandwidth and probably fit within a 10 Gbit/s link, but not a 1 Gbit/s one. In many real world scenarios, Redis throughput is limited by the network well before being limited by the CPU. To consolidate several high-throughput Redis instances on a single server, it worth considering putting a 10 Gbit/s NIC or multiple 1 Gbit/s NICs with TCP/IP bonding.
+
++ CPU is another very important factor. Being single-threaded, Redis favors fast CPUs with large caches and not many cores. At this game, Intel CPUs are currently the winners. It is not uncommon to get only half the performance on an AMD Opteron CPU compared to similar Nehalem EP/Westmere EP/Sandy Bridge Intel CPUs with Redis. When client and server run on the same box, the CPU is the limiting factor with redis-benchmark.
+
++ Speed of RAM and memory bandwidth seem less critical for global performance especially for small objects. For large objects (>10 KB), it may become noticeable though. Usually, it is not really cost-effective to buy expensive fast memory modules to optimize Redis.
+
++ Redis runs slower on a VM compared to running without virtualization using the same hardware. If you have the chance to run Redis on a physical machine this is preferred. However this does not mean that Redis is slow in virtualized environments, the delivered performances are still very good and most of the serious performance issues you may incur in virtualized environments are due to over-provisioning, non-local disks with high latency, or old hypervisor software that have slow fork syscall implementation.
+
++ When the server and client benchmark programs run on the same box, both the TCP/IP loopback and unix domain sockets can be used. Depending on the platform, unix domain sockets can achieve around 50% more throughput than the TCP/IP loopback (on Linux for instance). The default behavior of redis-benchmark is to use the TCP/IP loopback.
+
++ The performance benefit of unix domain sockets compared to TCP/IP loopback tends to decrease when pipelining is heavily used (i.e. long pipelines).
+
++ When an ethernet network is used to access Redis, aggregating commands using pipelining is especially efficient when the size of the data is kept under the ethernet packet size (about 1500 bytes). Actually, processing 10 bytes, 100 bytes, or 1000 bytes queries almost result in the same throughput. 
+
+## Latency Diagnosis
+
+In this context latency is the maximum delay between the time a client issues a command and the time the reply to the command is received by the client. Usually Redis processing time is extremely low, in the sub microsecond range, but there are certain conditions leading to higher latency figures.
+
+The following documentation is very important in order to run Redis in a low latency fashion. However I understand that we are busy people, so let's start with a quick checklist. 
+
++ Make sure you are not running slow commands that are blocking the server. Use the Redis Slow Log feature to check this.
++ For EC2 users, make sure you use HVM based modern EC2 instances, like m3.medium. Otherwise fork() is too slow.
++ Transparent huge pages must be disabled from your kernel. Use echo never > /sys/kernel/mm/transparent_hugepage/enabled to disable them, and restart your Redis process.
++ If you are using a virtual machine, it is possible that you have an intrinsic latency that has nothing to do with Redis. Check the minimum latency you can expect from your runtime environment using `./redis-cli --intrinsic-latency 100`. Note: you need to run this command in the server not in the client.
+Enable and use the Latency monitor feature of Redis in order to get a human readable description of the latency events and causes in your Redis instance.
+
+**Latency Baseline**
+
+There is a kind of latency that is inherently part of the environment where you run Redis, that is the latency provided by your operating system kernel and, if you are using virtualization, by the hypervisor you are using.
+
+While this latency can't be removed it is important to study it because it is the baseline, or in other words, you won't be able to achieve a Redis latency that is better than the latency that every process running in your environment will experience because of the kernel or hypervisor implementation or setup.
+
+We call this kind of latency intrinsic latency, and redis-cli starting from Redis version 2.8.7 is able to measure it. This is an example run under Linux 3.11.0 running on an entry level server.
+
+Note: the argument 100 is the number of seconds the test will be executed. The more time we run the test, the more likely we'll be able to spot latency spikes. 100 seconds is usually appropriate, however you may want to perform a few runs at different times. Please note that the test is CPU intensive and will likely saturate a single core in your system.
+
+```bash
+$ ./redis-cli --intrinsic-latency 100
+Max latency so far: 1 microseconds.
+Max latency so far: 16 microseconds.
+Max latency so far: 50 microseconds.
+Max latency so far: 53 microseconds.
+Max latency so far: 83 microseconds.
+Max latency so far: 115 microseconds.
+```
+
+Note: redis-cli in this special case needs to run in the server where you run or plan to run Redis, not in the client. In this special mode redis-cli does not connect to a Redis server at all: it will just try to measure the largest time the kernel does not provide CPU time to run to the redis-cli process itself.
+
+In the above example, the intrinsic latency of the system is just 0.115 milliseconds (or 115 microseconds), which is a good news, however keep in mind that the intrinsic latency may change over time depending on the load of the system.
+
+Virtualized environments will not show so good numbers, especially with high load or if there are noisy neighbors. The following is a run on a Linode 4096 instance running Redis and Apache:
+
+```bash
+$ ./redis-cli --intrinsic-latency 100
+Max latency so far: 573 microseconds.
+Max latency so far: 695 microseconds.
+Max latency so far: 919 microseconds.
+Max latency so far: 1606 microseconds.
+Max latency so far: 3191 microseconds.
+Max latency so far: 9243 microseconds.
+Max latency so far: 9671 microseconds.
+```
+
+Here we have an intrinsic latency of 9.7 milliseconds: this means that we can't ask better than that to Redis. However other runs at different times in different virtualization environments with higher load or with noisy neighbors can easily show even worse values. We were able to measure up to 40 milliseconds in systems otherwise apparently running normally.
+
+**Latency generated by slow commands**
+
+A consequence of being single thread is that when a request is slow to serve all the other clients will wait for this request to be served. When executing normal commands, like GET or SET or LPUSH this is not a problem at all since these commands are executed in constant (and very small) time. However there are commands operating on many elements, like SORT, LREM, SUNION and others. For instance taking the intersection of two big sets can take a considerable amount of time.
+
+If you have latency concerns you should either not use slow commands against values composed of many elements, or you should run a replica using Redis replication where you run all your slow queries.
+
+It is possible to monitor slow commands using the Redis Slow Log feature.
+
+Additionally, you can use your favorite per-process monitoring program (top, htop, prstat, etc ...) to quickly check the CPU consumption of the main Redis process. If it is high while the traffic is not, it is usually a sign that slow commands are used.
+
+IMPORTANT NOTE: a VERY common source of latency generated by the execution of slow commands is the use of the `KEYS` command in production environments. KEYS, as documented in the Redis documentation, should only be used for debugging purposes. Since Redis 2.8 a new commands were introduced in order to iterate the key space and other large collections incrementally, please check the `SCAN`, `SSCAN`, `HSCAN` and `ZSCAN` commands for more information.
+
+**Latency generated by fork**
+
+In order to generate the RDB file in background, or to rewrite the Append Only File if AOF persistence is enabled, Redis has to fork background processes. The fork operation (running in the main thread) can induce latency by itself.
+
+Forking is an expensive operation on most Unix-like systems, since it involves copying a good number of objects linked to the process. This is especially true for the page table associated to the virtual memory mechanism.
+
+For instance on a Linux/AMD64 system, the memory is divided in 4 kB pages. To convert virtual addresses to physical addresses, each process stores a page table (actually represented as a tree) containing at least a pointer per page of the address space of the process. So a large 24 GB Redis instance requires a page table of 24 GB / 4 kB * 8 = 48 MB.
+
+When a background save is performed, this instance will have to be forked, which will involve allocating and copying 48 MB of memory. It takes time and CPU, especially on virtual machines where allocation and initialization of a large memory chunk can be expensive.
+
+## Latency induced by swapping (operating system paging)
+
+Linux (and many other modern operating systems) is able to relocate memory pages from the memory to the disk, and vice versa, in order to use the system memory efficiently.
+
+If a Redis page is moved by the kernel from the memory to the swap file, when the data stored in this memory page is used by Redis (for example accessing a key stored into this memory page) the kernel will stop the Redis process in order to move the page back into the main memory. This is a slow operation involving random I/Os (compared to accessing a page that is already in memory) and will result into anomalous latency experienced by Redis clients.
+
+The kernel relocates Redis memory pages on disk mainly because of three reasons:
+
++ The system is under memory pressure since the running processes are demanding more physical memory than the amount that is available. The simplest instance of this problem is simply Redis using more memory than is available.
+
++ The Redis instance data set, or part of the data set, is mostly completely idle (never accessed by clients), so the kernel could swap idle memory pages on disk. This problem is very rare since even a moderately slow instance will touch all the memory pages often, forcing the kernel to retain all the pages in memory.
+
++ Some processes are generating massive read or write I/Os on the system. Because files are generally cached, it tends to put pressure on the kernel to increase the filesystem cache, and therefore generate swapping activity. Please note it includes Redis RDB and/or AOF background threads which can produce large files.
+
+Fortunately Linux offers good tools to investigate the problem, so the simplest thing to do is when latency due to swapping is suspected is just to check if this is the case.
+
+The first thing to do is to checking the amount of Redis memory that is swapped on disk. In order to do so you need to obtain the Redis instance pid:
+
+```bash
+$ redis-cli info | grep process_id
+process_id:5454
+```
+
+Now enter the `/proc` file system directory for this process:
+
+```bash
+$ cd /proc/5454
+```
+
+Here you'll find a file called smaps that describes the memory layout of the Redis process (assuming you are using Linux 2.6.16 or newer). This file contains very detailed information about our process memory maps, and one field called Swap is exactly what we are looking for. However there is not just a single swap field since the smaps file contains the different memory maps of our Redis process (The memory layout of a process is more complex than a simple linear array of pages).
+
+Since we are interested in all the memory swapped by our process the first thing to do is to grep for the Swap field across all the file:
+
+```bash
+$ cat smaps | grep 'Swap:'
+Swap:                  0 kB
+Swap:                  0 kB
+Swap:                  0 kB
+Swap:                  0 kB
+Swap:                  0 kB
+Swap:                 12 kB
+Swap:                156 kB
+Swap:                  8 kB
+Swap:                  0 kB
+Swap:                  0 kB
+Swap:                  0 kB
+Swap:                  0 kB
+Swap:                  0 kB
+Swap:                  0 kB
+Swap:                  0 kB
+Swap:                  0 kB
+Swap:                  0 kB
+Swap:                  4 kB
+```
+
+If everything is 0 kB, or if there are sporadic 4k entries, everything is perfectly normal. Actually in our example instance (the one of a real web site running Redis and serving hundreds of users every second) there are a few entries that show more swapped pages. To investigate if this is a serious problem or not we change our command in order to also print the size of the memory map:
+
+If instead a non trivial amount of the process memory is swapped on disk your latency problems are likely related to swapping. If this is the case with your Redis instance you can further verify it using the vmstat command:
+
+```bash
+$ vmstat 1
+procs -----------memory---------- ---swap-- -----io---- -system-- ----cpu----
+ r  b   swpd   free   buff  cache   si   so    bi    bo   in   cs us sy id wa
+ 0  0   3980 697932 147180 1406456    0    0     2     2    2    0  4  4 91  0
+ 0  0   3980 697428 147180 1406580    0    0     0     0 19088 16104  9  6 84  0
+ 0  0   3980 697296 147180 1406616    0    0     0    28 18936 16193  7  6 87  0
+ 0  0   3980 697048 147180 1406640    0    0     0     0 18613 15987  6  6 88  0
+ 2  0   3980 696924 147180 1406656    0    0     0     0 18744 16299  6  5 88  0
+ 0  0   3980 697048 147180 1406688    0    0     0     4 18520 15974  6  6 88  0
+^C
+```
+
+The interesting part of the output for our needs are the two columns si and so, that counts the amount of memory swapped from/to the swap file. If you see non zero counts in those two columns then there is swapping activity in your system.
+
+Finally, the iostat command can be used to check the global I/O activity of the system.
+
+```bash
+$ iostat -xk 1
+avg-cpu:  %user   %nice %system %iowait  %steal   %idle
+          13.55    0.04    2.92    0.53    0.00   82.95
+
+Device:         rrqm/s   wrqm/s     r/s     w/s    rkB/s    wkB/s avgrq-sz avgqu-sz   await  svctm  %util
+sda               0.77     0.00    0.01    0.00     0.40     0.00    73.65     0.00    3.62   2.58   0.00
+sdb               1.27     4.75    0.82    3.54    38.00    32.32    32.19     0.11   24.80   4.24   1.85
+```
+
+If your latency problem is due to Redis memory being swapped on disk you need to lower the memory pressure in your system, either adding more RAM if Redis is using more memory than the available, or avoiding running other memory hungry processes in the same system.
+
+## Latency due to AOF and disk I/O
+
+Another source of latency is due to the Append Only File support on Redis. The AOF basically uses two system calls to accomplish its work. One is write(2) that is used in order to write data to the append only file, and the other one is fdatasync(2) that is used in order to flush the kernel file buffer on disk in order to ensure the durability level specified by the user.
+
+Both the write(2) and fdatasync(2) calls can be source of latency. For instance write(2) can block both when there is a system wide sync in progress, or when the output buffers are full and the kernel requires to flush on disk in order to accept new writes.
+
+The fdatasync(2) call is a worse source of latency as with many combinations of kernels and file systems used it can take from a few milliseconds to a few seconds to complete, especially in the case of some other process doing I/O. For this reason when possible Redis does the fdatasync(2) call in a different thread since Redis 2.4.
+
+The AOF can be configured to perform a fsync on disk in three different ways using the appendfsync configuration option (this setting can be modified at runtime using the CONFIG SET command).
+
++ When appendfsync is set to the value of no Redis performs no fsync. In this configuration the only source of latency can be write(2). When this happens usually there is no solution since simply the disk can't cope with the speed at which Redis is receiving data, however this is uncommon if the disk is not seriously slowed down by other processes doing I/O.
+
++ When appendfsync is set to the value of everysec Redis performs a fsync every second. It uses a different thread, and if the fsync is still in progress Redis uses a buffer to delay the write(2) call up to two seconds (since write would block on Linux if a fsync is in progress against the same file). However if the fsync is taking too long Redis will eventually perform the write(2) call even if the fsync is still in progress, and this can be a source of latency.
+
++ When appendfsync is set to the value of always a fsync is performed at every write operation before replying back to the client with an OK code (actually Redis will try to cluster many commands executed at the same time into a single fsync). In this mode performances are very low in general and it is strongly recommended to use a fast disk and a file system implementation that can perform the fsync in short time.
+
+Most Redis users will use either the no or everysec setting for the appendfsync configuration directive. The suggestion for minimum latency is to avoid other processes doing I/O in the same system. Using an SSD disk can help as well, but usually even non SSD disks perform well with the append only file if the disk is spare as Redis writes to the append only file without performing any seek.
+
+If you want to investigate your latency issues related to the append only file you can use the strace command under Linux:
+
+```bash
+sudo strace -p $(pidof redis-server) -T -e trace=fdatasync
+```
+
+The above command will show all the fdatasync(2) system calls performed by Redis in the main thread. With the above command you'll not see the fdatasync system calls performed by the background thread when the appendfsync config option is set to everysec. In order to do so just add the -f switch to `strace`.
+
+If you wish you can also see both fdatasync and write system calls with the following command:
+
+```bash
+sudo strace -p $(pidof redis-server) -T -e trace=fdatasync,write
+```
+
+However since write(2) is also used in order to write data to the client sockets this will likely show too many things unrelated to disk I/O. Apparently there is no way to tell strace to just show slow system calls so I use the following command:
+
+```bash
+sudo strace -f -p $(pidof redis-server) -T -e trace=fdatasync,write 2>&1 | grep -v '0.0' | grep -v unfinished
+```
+
+## Debugging Redis
+
+When Redis crashes, it produces a detailed report of what happened. However, sometimes looking at the crash report is not enough, nor is it possible for the Redis core team to reproduce the issue independently. In this scenario, we need help from the user who can reproduce the issue.
+
+This guide shows how to use GDB to provide the information the Redis developers will need to track the bug more easily.
+
+GDB is the Gnu Debugger: a program that is able to inspect the internal state of another program. Usually tracking and fixing a bug is an exercise in gathering more information about the state of the program at the moment the bug happens, so GDB is an extremely useful tool.
+
+GDB can be used in two ways:
+
++ It can attach to a running program and inspect the state of it at runtime.
++ It can inspect the state of a program that already terminated using what is called a core file, that is, the image of the memory at the time the program was running.
++ From the point of view of investigating Redis bugs we need to use both of these GDB modes. The user able to reproduce the bug attaches GDB to their running Redis instance, and when the crash happens, they create the core file that in turn the developer will use to inspect the Redis internals at the time of the crash.
+
+This way the developer can perform all the inspections in his or her computer without the help of the user, and the user is free to restart Redis in their production environment.
+
+**Attaching GDB to a running process**
+
+If you have an already running Redis server, you can attach GDB to it, so that if Redis crashes it will be possible to both inspect the internals and generate a core dump file.
+
+After you attach GDB to the Redis process it will continue running as usual without any loss of performance, so this is not a dangerous procedure.
+
+In order to attach GDB the first thing you need is the process ID of the running Redis instance (the pid of the process). You can easily obtain it using redis-cli:
+
+```bash
+$ redis-cli info | grep process_id
+process_id:58414
+```
+
+Login into your Redis server.
+
+(Optional but recommended) Start screen or tmux or any other program that will make sure that your GDB session will not be closed if your ssh connection times out. 
+
+Attach GDB to the running Redis server by typing:
+```bash
+$ gdb <path-to-redis-executable> <pid>
+```
+
+GDB will start and will attach to the running server printing something like the following:
+
+```bash
+Reading symbols for shared libraries + done
+0x00007fff8d4797e6 in epoll_wait ()
+(gdb)
+```
+
+At this point GDB is attached but your Redis instance is blocked by GDB. In order to let the Redis instance continue the execution just type continue at the GDB prompt, and press enter.
+
+```bash
+(gdb) continue
+Continuing.
+```
+
+Done! Now your Redis instance has GDB attached. Now you can wait for the next crash. :)
+
+Now it's time to detach your screen/tmux session, if you are running GDB using it, by pressing Ctrl-a a key combination.
+
+**After the crash**
+
+Redis has a command to simulate a segmentation fault (in other words a bad crash) using the DEBUG SEGFAULT command (don't use it against a real production instance of course! So I'll use this command to crash my instance to show what happens in the GDB side:
+
+```bash
+(gdb) continue
+Continuing.
+
+Program received signal EXC_BAD_ACCESS, Could not access memory.
+Reason: KERN_INVALID_ADDRESS at address: 0xffffffffffffffff
+debugCommand (c=0x7ffc32005000) at debug.c:220
+220         *((char*)-1) = 'x';
+```
+
+As you can see GDB detected that Redis crashed, and was even able to show me the file name and line number causing the crash. This is already much better than the Redis crash report back trace (containing just function names and binary offsets).
 
 ## Forking
 
