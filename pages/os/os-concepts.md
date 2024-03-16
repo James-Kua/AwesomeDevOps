@@ -103,6 +103,8 @@ Context switches are expensive. The process state needs to be saved / restored a
 
 ## Process Control Block (PCB)
 
+![](https://www.cs.uic.edu/~jbell/CourseNotes/OperatingSystems/images/Chapter3/3_03_PCB.jpg)
+
 Each process has it's own virtual machine: They have their own virtual CPU, address space (stack, heap, text, data, etc), open file descriptors, etc. Enough data must be stored such that all of this remains preserved after a context switch.
 
 The information that gets stored on a context switch is:
@@ -111,32 +113,148 @@ The information that gets stored on a context switch is:
 - **Process management info**: process ID (PID), parent process, process group, priority, CPU used, etc.
 - **File management info**: root directory, working directory, open file descriptors, etc.
 
-## Process Creation
 
-There are two types of processes:
+## Creating Processes
 
-- **Foreground**: processes that interact with users.
-- **Background**: daemons (e.g. handling incoming mail, printing requests, etc).
+```c
+int fork(void)
+```
 
-Processes are created on:
+`fork` creates a new child process by making an exact copy of the parent process image. The child process inherits its parent's resources and will begin to execute concurrently with it.
 
-- system initialisation.
-- user request.
-- system calls by a running process.
+`fork` returns twice, once in the parent, and once in the child:
 
-Processes terminated can be caused by:
+- **Parent**: return value is the process ID of the child.
+- **Child**: return value is `0`.
+- **Error**: if fork is unable to create a child, `-1` is returned to the parent. This can happen if there isn't enough memory to create the child process in.
 
-- **Normal Completion**: when the process completes the execution of its body.
-- **System Calls**: e.g. `exit()` in UNIX, `ExitProcess()` in Windows.
-- **Abnormal Exit**: when the process runs into an error or unhandled exception.
-- **Aborted**: when another process overrules its execution (e.g. killed from terminall).
-- **Never**: some processes run in an endless loop and never terminate unless an error occurs (e.g. most web servers).
+An example of some code using `fork`:
+
+```c
+#include <unistd.h>
+#include <stdio.h>
+
+int main() {
+  if (fork() != 0) {
+    printf("Parent process\n");
+  } else {
+    printf("Child process\n");
+  }
+
+  printf("Common code\n");
+}
+```
+
+## Executing Processes
+
+```c
+int execve(
+  const char *path,
+  char *const argv[],
+  char *const envp[]
+)
+```
+
+`execve` executes a command. Instead of copying the parent process, a completely new process is made.
+
+Its arguments are:
+
+- `path`: the full pathname of the program to be executed.
+- `argv`: the arguments passed to this program.
+- `envp`: a list of environment variables.
+
+`execve` has many useful wrappers (`execl`, `execle`, `execvp`, `execv`, etc). Read `man execve` for more.
+
+## Waiting for Process Termination
+
+```c
+int waitpid(
+  int pid,
+  int* stat,
+  int options
+)
+```
+
+`waitpid` suspends execution of the calling process until the child process with the PID terminates normally or it receives a signal.
+
+`waitpid` can be used to wait for multiple children:
+
+- `pid = -1`: wait for any child.
+- `pid = 0` wait for any child in the same process group as caller.
+- `pid = -gid` wait for any child with process group `gid`.
+
+Its return value can be:
+
+- the `pid` of the terminated child process.
+- `0` if `WNOHANG` is set in options. This option "is used to indicate that the call should not block if there are no processes that wish to report status" (from `man waitpid`).
+- `-1` on error, and `errno` is set to indicate the error (see `man errno`).
+
+## Process Termination
+
+```c
+void exit(int status)
+```
+
+`exit` terminates the calling process, returning the exit `status` to the parent process (i.e. through `int *stat` in `waitpid`).
+
+```c
+void kill(int pid, int sid)
+```
+`kill` sends signal `sig` to process with PID `pid`.
+
+An example of `exit`:
+
+```c
+#include <unistd.h>
+#include <sys/wait.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+int main() {
+  int pid = fork();
+
+  if (pid != 0) {
+    // parent process
+    int *stat;
+    waitpid(pid, stat, 0);
+    printf("Child exit status is: %d\n", WEXITSTATUS(*stat));
+  } else {
+    // child process
+    exit(4);
+  }
+}
+```
+
+```
+$ gcc a.c && ./a.out
+Child exit status is: 4
+```
+
+
 
 ## Process Hierarchies
 
 UNIX allows for processes to form hierarchies (e.g. parent, child, child's child, etc).
 
 Windows has no notion of process hierarchy. Instead when a process is created its parent is given a handle token to control it. This handle can be passed around to other processes.
+
+## Process States
+
++ Zombie: has completed execution, still has an entry in the process table
++ Orphan: parent has finished or terminated while this process is still running
++ Daemon: runs as a background process, not under the direct control of an interactive user.
+
+### Zombie Process
+
+On Unix and Unix-like computer operating systems, a zombie process or defunct process is a process that has completed execution (via the exit system call) but still has an entry in the process table: it is a process in the "Terminated state".
+
+This occurs for child processes, where the entry is still needed to allow the parent process to read its child's exit status: once the exit status is read via the wait system call, the zombie's entry is removed from the process table and it is said to be "reaped". A child process always first becomes a zombie before being removed from the resource table.
+
+In most cases, under normal system operation zombies are immediately waited on by their parent and then reaped by the system – processes that stay zombies for a long time are generally an error and cause a resource leak.
+
+The term zombie process derives from the common definition of zombie — an undead person. In the term's metaphor, the child process has "died" but has not yet been "reaped". Also, unlike normal processes, the kill command has no effect on a zombie process.
+
+Zombie processes should not be confused with orphan processes: an orphan process is a process that is still executing, but whose parent has died. These do not remain as zombie processes; instead, (like all orphaned processes) they are adopted by init (process ID 1), which waits on its children. The result is that a process that is both a zombie and an orphan will be reaped automatically.
 
 ## Linux Signals
 
@@ -168,6 +286,8 @@ Also, Since we usually have processes running in background so the shell just se
 
 A thread is an execution stream that share the same address space. When multithreading is used, each process can contain one or more threads.
 
+![](https://www.cs.uic.edu/~jbell/CourseNotes/OperatingSystems/images/Chapter4/4_01_ThreadDiagram.jpg)
+
 A break down of per process and per thread items is:
 
 Per process items:
@@ -198,11 +318,22 @@ Per thread items:
 
 + Threads have a shared address space. This means that they don't have any protection from reading / writing to each others stack like processes have. This can cause memory corruption issues and other concurrency bugs due to concurrent access to shared data (e.g. through global variables).
 
-+ Forking inside a thread is another concern. Does the fork create a new process with the same number of threads, or with a single thread?
+**If one thread forks, is the entire process copied, or is the new process single-threaded?**
 
-+ Handling signals also becomes an issue. Which thread should handle the signal?
+A: It is system dependant. If the new process execs right away, there is no need to copy all the other threads. If it doesn't, then the entire process should be copied. Many versions of UNIX provide multiple versions of the fork call for this purpose.
+
+
+**Handling signals also becomes an issue. Which thread should handle the signal?**
+
+There are four major options:
+1. Deliver the signal to the thread to which the signal applies.
+2. Deliver the signal to every thread in the process.
+3. Deliver the signal to certain threads in the process.
+4. Assign a specific thread to receive all signals in a process.
 
 ##  Scheduling
+
+![](https://www.cs.uic.edu/~jbell/CourseNotes/OperatingSystems/images/Chapter3/3_06_QueueingDiagram.jpg)
 
 Linux scheduling is based on the time sharing technique: several processes run in “time multiplexing” because the CPU time is divided into slices, one for each runnable process. If a currently running process is not terminated when its time slice or quantum expires, a process switch may take place. Time sharing relies on timer interrupts and is thus transparent to processes. No additional code needs to be inserted in the programs to ensure CPU time sharing.
 
@@ -216,19 +347,34 @@ Process scheduling is an essential part of a Multiprogramming operating systems.
 
 ## Memory Management
 
-The process address space is the set of logical addresses that a process references in its code. For example, when 32-bit addressing is in use, addresses can range from 0 to 0x7fffffff; that is, 2³¹ possible numbers, for a total theoretical size of 2 gigabytes.
++ It should be noted that from the memory chips point of view, all memory accesses are equivalent. The memory hardware doesn't know what a particular part of memory is being used for, nor does it care. This is almost true of the OS as well, although not entirely.
 
-The operating system takes care of mapping the logical addresses to physical addresses at the time of memory allocation to the program. There are three types of addresses used in a program before and after memory is allocated:
++ The CPU can only access its registers and main memory. It cannot, for example, make direct access to the hard drive, so any data stored there must first be transferred into the main memory chips before the CPU can work with it. ( Device drivers communicate with their hardware via interrupts and "memory" accesses, sending short instructions for example to transfer data from the hard drive to a specified location in main memory. The disk controller monitors the bus for such instructions, transfers the data, and then notifies the CPU that the data is there with another interrupt, but the CPU never gets direct access to the disk. )
 
-- Symbolic addresses: The addresses used in a source code. The variable names, constants, and instruction labels are the basic elements of the symbolic address space.
++ Memory accesses to registers are very fast, generally one clock tick, and a CPU may be able to execute more than one machine instruction per clock tick.
 
-- Relative addresses: At the time of compilation, a compiler converts symbolic addresses into relative addresses.
++ Memory accesses to main memory are comparatively slow, and may take a number of clock ticks to complete. This would require intolerable waiting by the CPU if it were not for an intermediary fast memory cache built into most modern CPUs. The basic idea of the cache is to transfer chunks of memory at a time from the main memory to the cache, and then to access individual memory locations one at a time from the cache.
 
-- Physical addresses: The loader generates these addresses at the time when a program is loaded into main memory.
++ User processes must be restricted so that they only access memory locations that "belong" to that particular process. This is usually implemented using a base register and a limit register for each process, as shown in Figures 8.1 and 8.2 below. Every memory access made by a user process is checked against these two registers, and if a memory access is attempted outside the valid range, then a fatal error is generated. The OS obviously has access to all existing memory locations, as this is necessary to swap users' code and data in and out of memory. It should also be obvious that changing the contents of the base and limit registers is a privileged activity, allowed only to the OS kernel.
 
-Virtual and physical addresses are the same in compile-time and load-time address-binding schemes. Virtual and physical addresses differ in execution-time address-binding scheme.
+![](https://www.cs.uic.edu/~jbell/CourseNotes/OperatingSystems/images/Chapter8/8_02_HardwareAddressProtection.jpg)
 
-The set of all logical addresses generated by a program is referred to as a logical address space. The set of all physical addresses corresponding to these logical addresses is referred to as a physical address space.
+## Logical vs Physical Address Space
+
++ The address generated by the CPU is a logical address, whereas the address actually seen by the memory hardware is a physical address.
+
++ Addresses bound at compile time or load time have identical logical and physical addresses.
+
++ Addresses created at execution time, however, have different logical and physical addresses.
+  + In this case the logical address is also known as a virtual address, and the two terms are used interchangeably by our text.
+  + The set of all logical addresses used by a program composes the logical address space, and the set of all corresponding physical addresses composes the physical address space.
+
++ The run time mapping of logical to physical addresses is handled by the memory-management unit, MMU.
+  + The MMU can take on many forms. One of the simplest is a modification of the base-register scheme described earlier.
+  + The base register is now termed a relocation register, whose value is added to every memory request at the hardware level.
+
+Note that user programs never see physical addresses. User programs work entirely in logical address space, and any memory references or manipulations are done using purely logical addresses. Only when the address gets sent to the physical memory chips is the physical memory address generated.
+
 
 ### Locality 
 
@@ -276,6 +422,39 @@ In both versions, the loop variables (i and j) and the accumulator variable (tot
 However, due to the **row-major order** organization of a matrix in memory, the first version of the code (left) executes about five times faster than the second version (right). The disparity arises from the difference in spatial locality — the first version accesses the matrix’s values sequentially in memory (that is, in order of consecutive memory addresses). Thus, it benefits from a system that loads large blocks from memory into the cache because it pays the cost of going to memory only once for every block of values.
 
 The second version accesses the matrix’s values by repeatedly jumping between rows across nonsequential memory addresses. It never reads from the same cache block in subsequent memory accesses, so it looks to the cache like the block isn’t needed. Thus, it pays the cost of going to memory for every matrix value it reads.
+
+## Contiguous Memory Allocation
+
+One approach to memory management is to load each process into a contiguous space. The operating system is allocated space first, usually at either low or high memory locations, and then the remaining available memory is allocated to processes as needed.
+
+The system shown below allows protection against user programs accessing areas that they should not, allows programs to be relocated to different memory starting addresses as needed, and allows the memory space devoted to the OS to grow or shrink dynamically as needs change.
+
+![](https://www.cs.uic.edu/~jbell/CourseNotes/OperatingSystems/images/Chapter8/8_06_HardwareSupport.jpg)
+
+### Memory Allocation
+
+One method of allocating contiguous memory is to divide all available memory into equal sized partitions, and to assign each process to their own partition. This restricts both the number of simultaneous processes and the maximum size of each process, and is no longer used.
+
+An alternate approach is to keep a list of unused ( free ) memory blocks ( holes ), and to find a hole of a suitable size whenever a process needs to be loaded into memory. There are many different strategies for finding the "best" allocation of memory to processes, including the three most commonly discussed:
++ **First fit** - Search the list of holes until one is found that is big enough to satisfy the request, and assign a portion of that hole to that process. Whatever fraction of the hole not needed by the request is left on the free list as a smaller hole. Subsequent requests may start looking either from the beginning of the list or from the point at which this search ended.
++ **Best fit** - Allocate the smallest hole that is big enough to satisfy the request. This saves large holes for other process requests that may need them later, but the resulting unused portions of holes may be too small to be of any use, and will therefore be wasted. Keeping the free list sorted can speed up the process of finding the right hole.
++ **Worst fit** - Allocate the largest hole available, thereby increasing the likelihood that the remaining portion will be usable for satisfying future requests.
+
+Simulations show that either first or best fit are better than worst fit in terms of both time and storage utilization. First and best fits are about equal in terms of storage utilization, but first fit is faster.
+
+### Fragmentation
+
+All the memory allocation strategies suffer from external fragmentation, though first and best fits experience the problems more so than worst fit. External fragmentation means that the available memory is broken up into lots of little pieces, none of which is big enough to satisfy the next memory requirement, although the sum total could.
+
+The amount of memory lost to fragmentation may vary with algorithm, usage patterns, and some design decisions such as which end of a hole to allocate and which end to save on the free list.
+
+Statistical analysis of first fit, for example, shows that for N blocks of allocated memory, another 0.5 N will be lost to fragmentation.
+
+Internal fragmentation also occurs, with all memory allocation strategies. This is caused by the fact that memory is allocated in blocks of a fixed size, whereas the actual memory needed will rarely be that exact size. For a random distribution of memory requests, on the average 1/2 block will be wasted per memory request, because on the average the last allocated block will be only half full.
+
+If the programs in memory are relocatable, ( using execution-time address binding ), then the external fragmentation problem can be reduced via compaction, i.e. moving all processes down to one end of physical memory. This only involves updating the relocation register for each process, as all internal work is done using logical addresses.
+
+Another solution as we will see in is to allow processes to use non-contiguous blocks of physical memory, with a separate relocation register for each block.
 
 ## Paging
 
@@ -533,7 +712,6 @@ IPC is an abbreviation that stands for “Inter-process Communication”. It den
 - Send messages to other processes or receive messages from them.
 - Share a memory area with other processes.
 
-
 Data sharing among processes can be obtained by storing data in temporary files protected by locks. But this mechanism is never implemented as it proves costly since it requires accesses to the disk filesystem. For that reason, all UNIX Kernels include a set of system calls that supports process communications without interacting with the filesystem.
 
 Application programmers have a variety of needs that call for different communication mechanisms. Some of the basic mechanisms that UNIX systems, GNU/Linux is particular has to offer are:
@@ -553,245 +731,3 @@ There are various ways to launch processes that then communicate, and two ways d
 - A terminal is used to start one process, and perhaps a different terminal is used to start another.
 
 - The system function fork is called within one process (the parent) to spawn another process (the child).
-
-## Creating Processes
-
-```c
-int fork(void)
-```
-
-`fork` creates a new child process by making an exact copy of the parent process image. The child process inherits its parent's resources and will begin to execute concurrently with it.
-
-`fork` returns twice, once in the parent, and once in the child:
-
-- **Parent**: return value is the process ID of the child.
-- **Child**: return value is `0`.
-- **Error**: if fork is unable to create a child, `-1` is returned to the parent. This can happen if there isn't enough memory to create the child process in.
-
-An example of some code using `fork`:
-
-```c
-#include <unistd.h>
-#include <stdio.h>
-
-int main() {
-  if (fork() != 0) {
-    printf("Parent process\n");
-  } else {
-    printf("Child process\n");
-  }
-
-  printf("Common code\n");
-}
-```
-
-## Executing Processes
-
-```c
-int execve(
-  const char *path,
-  char *const argv[],
-  char *const envp[]
-)
-```
-
-`execve` executes a command. Instead of copying the parent process, a completely new process is made.
-
-Its arguments are:
-
-- `path`: the full pathname of the program to be executed.
-- `argv`: the arguments passed to this program.
-- `envp`: a list of environment variables.
-
-`execve` has many useful wrappers (`execl`, `execle`, `execvp`, `execv`, etc). Read `man execve` for more.
-
-## Waiting for Process Termination
-
-```c
-int waitpid(
-  int pid,
-  int* stat,
-  int options
-)
-```
-
-`waitpid` suspends execution of the calling process until the child process with the PID terminates normally or it receives a signal.
-
-`waitpid` can be used to wait for multiple children:
-
-- `pid = -1`: wait for any child.
-- `pid = 0` wait for any child in the same process group as caller.
-- `pid = -gid` wait for any child with process group `gid`.
-
-Its return value can be:
-
-- the `pid` of the terminated child process.
-- `0` if `WNOHANG` is set in options. This option "is used to indicate that the call should not block if there are no processes that wish to report status" (from `man waitpid`).
-- `-1` on error, and `errno` is set to indicate the error (see `man errno`).
-
-## Process Termination
-
-```c
-void exit(int status)
-```
-
-`exit` terminates the calling process, returning the exit `status` to the parent process (i.e. through `int *stat` in `waitpid`).
-
-```c
-void kill(int pid, int sid)
-```
-`kill` sends signal `sig` to process with PID `pid`.
-
-An example of `exit`:
-
-```c
-#include <unistd.h>
-#include <sys/wait.h>
-#include <stdio.h>
-#include <stdlib.h>
-
-int main() {
-  int pid = fork();
-
-  if (pid != 0) {
-    // parent process
-    int *stat;
-    waitpid(pid, stat, 0);
-    printf("Child exit status is: %d\n", WEXITSTATUS(*stat));
-  } else {
-    // child process
-    exit(4);
-  }
-}
-```
-
-```
-$ gcc a.c && ./a.out
-Child exit status is: 4
-```
-
-## I/O Management
-
-Management of I/O devices is a very important part of the operating system - so important and so varied that entire I/O subsystems are devoted to its operation. ( Consider the range of devices on a modern computer, from mice, keyboards, disk drives, display adapters, USB devices, network connections, audio I/O, printers, special devices for the handicapped, and many special-purpose peripherals.
-
-### Device Controllers
-
-Device drivers are software modules that can be plugged into an OS to handle a particular device. Operating System takes help from device drivers to handle all I/O devices.
-
-The Device Controller works like an interface between a device and a device driver. I/O units (Keyboard, mouse, printer, etc.) typically consist of a mechanical component and an electronic component where electronic component is called the device controller.
-
-There is always a device controller and a device driver for each device to communicate with the Operating Systems. A device controller may be able to handle multiple devices. As an interface its main task is to convert serial bit stream to block of bytes, perform error correction as necessary.
-
-Any device connected to the computer is connected by a plug and socket, and the socket is connected to a device controller. Following is a model for connecting the CPU, memory, controllers, and I/O devices where CPU and device controllers all use a common bus for communication.
-
-### Synchronous vs asynchronous I/O
-
-- Synchronous I/O − In this scheme CPU execution waits while I/O proceeds
-
-- Asynchronous I/O − I/O proceeds concurrently with CPU execution
-
-- Communication to I/O Devices
-
-The CPU must have a way to pass information to and from an I/O device. There are three approaches available to communicate with the CPU and Device.
-
-- Special Instruction I/O
-- Memory-mapped I/O
-- Direct memory access (DMA)
-
-## Virtualization
-
-Virtualization is the process of running a virtual instance of a computer system in a layer abstracted from the actual hardware. Most commonly, it refers to running multiple operating systems on a computer system simultaneously. To the applications running on top of the virtualized machine, it can appear as if they are on their own dedicated machine, where the operating system, libraries, and other programs are unique to the guest virtualized system and unconnected to the host operating system which sits below it.
-
-There are many reasons why people utilize virtualization in computing. To desktop users, the most common use is to be able to run applications meant for a different operating system without having to switch computers or reboot into a different system. For administrators of servers, virtualization also offers the ability to run different operating systems, but perhaps, more importantly, it offers a way to segment a large system into many smaller parts, allowing the server to be used more efficiently by a number of different users or applications with different needs. It also allows for isolation, keeping programs running inside of a virtual machine safe from the processes taking place in another virtual machine on the same host.
-
-### How does virtualization work?
-
-Software called hypervisors separate the physical resources from the virtual environments—the things that need those resources. Hypervisors can sit on top of an operating system (like on a laptop) or be installed directly onto hardware (like a server), which is how most enterprises virtualize. Hypervisors take your physical resources and divide them up so that virtual environments can use them.
-
-Resources are partitioned as needed from the physical environment to the many virtual environments. Users interact with and run computations within the virtual environment (typically called a guest machine or virtual machine). The virtual machine functions as a single data file. And like any digital file, it can be moved from one computer to another, opened in either one, and be expected to work the same
-
-When the virtual environment is running and a user or program issues an instruction that requires additional resources from the physical environment, the hypervisor relays the request to the physical system and caches the changes—which all happens at close to native speed (particularly if the request is sent through an open source hypervisor based on KVM, the Kernel-based Virtual Machine).
-
-
-### What is hypervisor?
-
- A hypervisor is a program for creating and running virtual machines. Hypervisors have traditionally been split into two classes: type one, or "bare metal" hypervisors that run guest virtual machines directly on a system's hardware, essentially behaving as an operating system. Wype two, or "hosted" hypervisors behave more like traditional applications that can be started and stopped like a normal program. In modern systems, this split is less prevalent, particularly with systems like KVM. KVM, short for kernel-based virtual machine, is a part of the Linux kernel that can run virtual machines directly, although you can still use a system running KVM virtual machines as a normal computer itself.
-
-Types of Virtualization:
-  - Data virtualization : Data virtualization tools sit in front of multiple data sources and allows them to be treated as single source, delivering the needed data—in the required form—at the right time to any application or user.
-  - Desktop Virtualization : desktop virtualization allows a central administrator (or automated administration tool) to deploy simulated desktop environments to hundreds of physical machines at once. 
-  - Server Virtualization : Servers are computers designed to process a high volume of specific tasks really well so other computers—like laptops and desktops—can do a variety of other tasks. Virtualizing a server lets it to do more of those specific functions and involves partitioning it so that the components can be used to serve multiple functions.
-  - Operating System Virtualization : Operating system virtualization happens at the kernel—the central task managers of operating systems. It’s a useful way to run Linux and Windows environments side-by-side.
-  - Network Function Virtualization : Virtualizing networks reduces the number of physical components—like switches, routers, servers, cables, and hubs—that are needed to create multiple, independent networks, and it’s particularly popular in the telecommunications industry.
-
-- Distributed File System Requirements Sharing files across nodes (processes, cpus, computers, networks) requires or benefits from certain attributes of the system.
-
-- Some attributes which are required or may be used as utility metrics for a DFS:
-
-   - naming
-
-   - transparency (works hand-in-hand with naming)
-
-   - concurrency (including synchronization)
-
-   - replication (caching, with consistency checks)
-
-   - platform independence (heterogeneity)
-
-   - fault tolerance
-
-   - consistency
-
-   - security 
-
-## Distributed File Systems
-
-A distributed file system is a file system that resides on different machines, but offers an integrated view of data stored on remote disks
-
-- Distributed file system (DFS) – a distributed implementation of the classical time-sharing model of a file system, where multiple users share files and storage resources.!A DFS manages set of dispersed storage devices! Overall storage space managed by a DFS is composed of different, remotely located, smaller storage spaces. There is usually a correspondence between constituent storage spaces and sets of files. 
-
-  - A DFS manages a set of dispersed storage devices
-
-  - The overall storage space is composed of heterogeneous, remotely located, smaller storage spaces.
-
-  - There is usually a correspondence between constituent storage spaces and sets of files. 
-
-Distributed File System Structure:
-
-  - Service– software entity running on one or more machines and providing a particular type of function to a priori unknown clients.
-
-  - Server– service software running on a single machine.
-
-  - Client–  process that can invoke a service using a set of operations that forms its client interface.
-
-  - A client interface for a file service is formed by a set of primitive file operations(create, delete, read, write).
-
-  - Client interface of a DFS should be transparent, i.e., not distinguish between local and remote files.
-
-- A distributed file system is a client/server-based application that allows clients to access and process data stored on the server as if it were on their own computer. When a user accesses a file on the server, the server sends the user a copy of the file, which is cached on the user’s computer while the data is being processed and is then returned to the server.
-
-
-## Cloud Computing
-
-Computing  itself,  to  be  considered  fully  virtualized,  must  allow  computers  to be  built  from  distributed components  such  as  processing,  storage,  data,  and software resources.
-
-In the simplest terms, cloud computing means storing and accessing data and programs over the Internet instead of your computer's hard drive. The cloud is just a metaphor for the Internet.
-
-What cloud computing is not about is your hard drive. When you store data on or run programs from the hard drive, that's called local storage and computing. Everything you need is physically close to you, which means accessing your data is fast and easy, for that one computer, or others on the local network. Working off your hard drive is how the computer industry functioned for decades; some would argue it's still superior to cloud computing, for reasons I'll explain shortly.
-
-Cloud computing is a model for enabling ubiquitous, convenient, on-demand network access to a shared pool of configurable computing resources (e.g., networks, servers, storage, applications, and services) that can be rapidly provisioned and released with minimal management effort or service provider interaction.
-
-Cloud computing is a model for enabling ubiquitous, convenient, on-demand network access to a shared pool of configurable computing resources (e.g., networks, servers, storage, applications, and services) that can be rapidly provisioned and released with minimal management effort or service provider interaction.
-
-There are five key characteristics of cloud computing : 
-
-- On-demand self-service : Users can access computing services via the cloud when they need to without interaction from the service provider. The computing services should be fully on-demand so that users have control and agility to meet their evolving needs.
-
-- Broad network access : Cloud computing services are widely available via the network through users’ preferred tools (e.g., laptops, desktops, smartphones, etc.).
-
-- Resource pooling : One of the most attractive elements of cloud computing is the pooling of resources to deliver computing services at scale. Resources, such as storage, memory, processing, and network bandwidth, are pooled and assigned to multiple consumers based on demand.
-
-- Rapid elasticity : Successful resource allocation requires elasticity. Resources must be assigned accurately and quickly with the ability to absorb significant increases and decreases in demand without service interruption or quality degradation.
-
-- Measured service : Following the utility model, cloud computing services are measured and metered. This measurement allows the service provider (and consumer) to track usage and gauge costs according to their demand on resources.
-
