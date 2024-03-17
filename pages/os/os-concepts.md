@@ -113,6 +113,23 @@ The information that gets stored on a context switch is:
 - **Process management info**: process ID (PID), parent process, process group, priority, CPU used, etc.
 - **File management info**: root directory, working directory, open file descriptors, etc.
 
+### Stack
+
+Stack memory is responsible for housing control information, local variables, and function arguments, including return addresses.Stack memory is responsible for housing control information, local variables, and function arguments, including return addresses. The stack is a "FILO" (first in, last out) data structure, that is managed and optimized by the CPU quite closely. Every time a function declares a new variable, it is "pushed" onto the stack. Then every time a function exits, all of the variables pushed onto the stack by that function, are freed (that is to say, they are deleted). Once a stack variable is freed, that region of memory becomes available for other stack variables.
+
+The advantage of using the stack to store variables, is that memory is managed for you. You don't have to allocate memory by hand, or free it once you don't need it any more. What's more, because the CPU organizes stack memory so efficiently, reading from and writing to stack variables is very fast.
+
+A key to understanding the stack is the notion that when a function exits, all of its variables are popped off of the stack (and hence lost forever). Thus stack variables are local in nature. This is related to a concept we saw earlier known as variable scope, or local vs global variables. A common bug in C programming is attempting to access a variable that was created on the stack inside some function, from a place in your program outside of that function (i.e. after that function has exited).
+
+Another feature of the stack to keep in mind, is that there is a limit (varies with OS) on the size of variables that can be store on the stack. This is not the case for variables allocated on the heap.
+
+### Heap
+
+The heap is a region of your computer's memory that is not managed automatically for you, and is not as tightly managed by the CPU. Heap memory, also known as dynamic memory, is the wild child of memory allocation. The programmer has to manage it manually. Heap memory allows us to allocate and free up memory at any time during our program's execution. It's great for storing large data structures or objects whose sizes aren't known in advance. To allocate memory on the heap, you must use malloc() or calloc(), which are built-in C functions. Once you have allocated memory on the heap, you are responsible for using free() to deallocate that memory once you don't need it any more. If you fail to do this, your program will have what is known as a memory leak. That is, memory on the heap will still be set aside (and won't be available to other processes). As we will see in the debugging section, there is a tool called valgrind that can help you detect memory leaks.
+
+Unlike the stack, the heap does not have size restrictions on variable size (apart from the obvious physical limitations of your computer). Heap memory is slightly slower to be read from and written to, because one has to use pointers to access memory on the heap. We will talk about pointers shortly.
+
+Unlike the stack, variables created on the heap are accessible by any function, anywhere in your program. Heap variables are essentially global in scope.
 
 ## Creating Processes
 
@@ -284,7 +301,7 @@ Also, Since we usually have processes running in background so the shell just se
 
 ## Threads and Concurrency
 
-A thread is an execution stream that share the same address space. When multithreading is used, each process can contain one or more threads.
+A thread is a subset of the process. It is termed as a ‘lightweight process’, since it is similar to a real process but executes within the context of a process and shares the same resources allotted to the process by the kernel. Usually, a process has only one thread of control – one set of machine instructions executing at a time. A process may also be made up of multiple threads of execution that execute instructions concurrently. Multiple threads of control can exploit the true parallelism possible on multiprocessor systems. All the threads running within a process share the same address space, file descriptors, stack and other process related attributes. Since the threads of a process share the same memory, synchronizing the access to the shared data withing the process gains unprecedented importance.
 
 ![](https://www.cs.uic.edu/~jbell/CourseNotes/OperatingSystems/images/Chapter4/4_01_ThreadDiagram.jpg)
 
