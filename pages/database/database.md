@@ -79,18 +79,18 @@ Sparse indexes require less maintenance than dense indexes at write-time since t
 
 ## ACID Model
 
-ACID: The term ACID stands for Atomicity, Consistency, Isolation, and Durability. ACID properties are used for maintaining data integrity during transaction processing.
+ACID is an acronym that refers to the set of 4 key properties that define a transaction: Atomicity, Consistency, Isolation, and Durability. If a database operation has these ACID properties, it can be called an ACID transaction, and data storage systems that apply these operations are called transactional systems. ACID transactions guarantee that each read, write, or modification of a table has the following properties:
 
 In order to maintain consistency before and after a transaction relational databases follow ACID properties. Let us understand these terms:
 
 Atomic
-+ All operations in a transaction succeed or every operation is rolled back.
++ Each statement in a transaction (to read, write, update or delete data) is treated as a single unit. Either the entire statement is executed, or none of it is executed. This property prevents data loss and corruption from occurring if, for example, if your streaming data source fails mid-stream.
 
 Consistent
-+ On the completion of a transaction, the database is structurally sound.
++ Ensures that transactions only make changes to tables in predefined, predictable ways. Transactional consistency ensures that corruption or errors in your data do not create unintended consequences for the integrity of your table.
 
 Isolated
-+ Transactions do not contend with one another. Contentious access to data is moderated by the database so that transactions appear to run sequentially.
++ When multiple users are reading and writing from the same table all at once, isolation of their transactions ensures that the concurrent transactions don't interfere with or affect one another. Contentious access to data is moderated by the database so that transactions appear to run sequentially.
 
 Durable
 + Once the transaction has been completed and the writes and updates have been written to the disk, it will remain in the system even if a system failure occurs.
