@@ -23,7 +23,8 @@
         ["TCP/UDP", "/networking/tcp-udp"],
         ["DNS", "/networking/dns"],
         ["SSL/TLS", "/networking/ssl-tls"],
-        ["HTTP/HTTPS", "/networking/http-https"]
+        ["HTTP/HTTPS", "/networking/http-https"],
+        ["ARP", "/networking/arp"]
       ]
     },
     {
