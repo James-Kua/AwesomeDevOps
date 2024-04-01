@@ -103,7 +103,33 @@ Any communication protocol allows information to be exchanged in a string of byt
 
 To begin with, TCP uses a variable-length header to support more complex data transmissions without compromising on reliability. The header can have anywhere between 20 and 60 bytes. In comparison, UDP has a fixed-length header, which is fast and efficient but less versatile. A UDP header can have only eight bytes. 
 
-TCP and UDP headers (i.e., their fields) are also different. TCP headers contain designated fields for the sequence number, checksum, the ACK number, a control bit, sliding window information, source port, destination port, and several others. In contrast, UDP headers are shorter and simpler as they only contain fields for checksum, source port, destination port, and a few other elements. 
+**TCP Headers**
+![](https://www.lifewire.com/thmb/irn835md4Hf2FmoEbh1rdAVNjTs=/1500x0/filters:no_upscale():max_bytes(150000):strip_icc()/tcp-headers-f2c0881ea4c94e919794b7c0677ab90a.jpg)
+
+The TCP header fields are as follows:
+
++ **Source port** – The sending device’s port.
++ **Destination port** – The receiving device’s port.
++ **Sequence number** – A device initiating a TCP connection must choose a random initial sequence number, which is then incremented according to the number of transmitted bytes.
++ **Acknowledgment number** – The receiving device maintains an acknowledgment number starting with zero. It increments this number according to the number of bytes received.
++ **TCP data offset** – This specifies the size of the TCP header, expressed in 32-bit words. One word represents four bytes.
++ **Reserved data** – The reserved field is always set to zero.
++ **Control flags** – TCP uses nine control flags to manage data flow in specific situations, such as the initiating of a reset.
++ **Window size TCP checksum** – The sender generates a checksum and transmits it in every packet header. The receiving device can use the checksum to check for errors in the received header and payload.
++ **Urgent pointer** – If URG control flag is set, this value indicates an offset from the sequence number, indicating the last urgent data byte.
++ **Optional data** – These are optional fields for setting maximum segment sizes, selective acknowledgments and enabling window scaling for more efficient use of high-bandwidth networks.
+
+**UDP Headers**
+
+![](https://notes.shichao.io/tcpv1/figure_10-2.png)
+
+The UDP header fields are as follows:
++ **Source port** – The port of the device sending the data. This field can be set to zero if the destination computer doesn’t need to reply to the sender.
++ **Destination port** – The port of the device receiving the data. UDP port numbers can be between 0 and 65,535.
++ **Length** – Specifies the number of bytes comprising the UDP header and the UDP payload data. The limit for the UDP length field is determined by the underlying IP protocol used to transmit the data.
++ **Checksum** – The checksum allows the receiving device to verify the integrity of the packet header and payload. It is optional in IPv4 but was made mandatory in IPv6.
+
+
 
 ## Applications
 
