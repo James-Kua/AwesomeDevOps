@@ -46,6 +46,12 @@
       ]
     },
     {
+      "title": "Cloud Native Tools",
+      "pages": [
+        ["Cloud Native Playground", "https://play.meshery.io"]
+      ]
+    },
+    {
       "title": "Links",
       "pages": [
         ["GitHub", "https://github.com/James-Kua/AwesomeDevOps"]
